@@ -1,0 +1,218 @@
+---
+title: "Mappe"
+author: "Luigi"
+date: "2023-02-15"
+output: word_document
+---
+
+# 0: Librerie necessarie
+
+```{r}
+library(ggplot2)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+```
+
+
+# 1: Importazione dataset
+
+\
+```{r}
+library(readxl)
+df<- as.data.frame(read_excel('C:\\files\\HDI maps\\GNI_in_2014_and_2019_LA.xlsx',
+                              col_names= FALSE, range = 'A4:E27'))
+
+
+dimnames(df)[[2]]<- c( "Country",  "code", "income_2014",
+                        "income_2019", "category")
+
+head(df)
+```
+\
+
+Abbiamo importato il dataset.
+
+# 2: Preparazione mappa
+
+```{r}
+europe<- ne_countries(scale= 'medium',continent = 'Europe' ,returnclass = 'sf')
+asia<- ne_countries(scale='medium', continent='Asia', returnclass = 'sf')
+africa<- ne_countries(scale= 'medium', continent= 'Africa', returnclass = 'sf')
+eurasiafrica<- rbind(europe, asia, africa)
+```
+
+Abbiamo creato le informazioni per i contorni dei paesi in europa, asia e africa. Le teniamo perché, inserendo Israele, si vedono anche parti del Nord Africa, che non vengono considerate ma i cui contorni sono comunque presenti nella mappa.
+
+# 3: Creaizone dataset con le informazioni
+
+Prendiamo da eurasiafrica le colonne con il nome della nazione e il codice iso_a2.
+Creiamo poi 2 colonne che conterranno le informazioni sulle variabili che ci interessano per la mappa.
+
+Creiamo anche la colonna control sul dataset iniziale, che ci permetterà di controllare che tutte le informazioni sono state trasferite al dataset finale e che all'inizio avrà valore 0 per tutti.
+
+```{r}
+map_europe_comp<- as.data.frame(cbind(eurasiafrica$name,eurasiafrica$iso_a2))
+dimnames(map_europe_comp)[[2]]<- c('name', 'iso_a2')
+
+df$control<- rep(0,dim(df)[1])
+
+map_europe_comp$income_2019<- rep(NA,dim(eurasiafrica)[1])
+map_europe_comp$category_income<- rep(NA,dim(eurasiafrica)[1])
+
+head(map_europe_comp)
+```
+
+
+Questo dataset ha una riga per ogni nazione in europa, asia o africa. Le colonne con le realizzazioni delle variabili di interesse per la mappa avranno NA per tutte le nazioni per cui non abbiamo informazione, mentre rempiamo le informazioni con un loop.
+
+Il loop confronta i codici iso_a2 del dataset iniziale per ognuna delle righe del dataset finale.
+Quando trova corrispondenza, copia sulla colonna nuova (che ha solo NA) del dataset finale le informazioni relative alla variabile di interesse per quella nazione.
+
+Quando c'è corrispondenza, inoltre, la vaiabile control assume valore 1 per quella nazione. In questo modo potremo alla fine controllare se tutte le nazioni sono state trovate nel dataset finale.
+
+```{r}
+for (z in c(1:dim(eurasiafrica)[1]))
+{
+  for (k in c(1: dim(df)[1]))
+  {
+    if (!is.na(map_europe_comp$iso_a2[z]) & df$code[k]== map_europe_comp$iso_a2[z])
+    {
+      map_europe_comp$income_2019[z]<- df$income_2019[k]
+      df$control[k]<- 1
+    }}}
+```
+
+Controllo:
+
+```{r}
+table(df$control)
+```
+
+Abbiamo verificato che tutte le righe per la variabile control hanno assunto valore 1, quindi tutte le informazioni sono state trasferite.
+
+```{r}
+head(map_europe_comp)
+```
+
+Guardando le prime 6 righe, notiamo che nel dataset finale sono ora presenti informazioni. 
+
+
+### Creazione variabile categorica dalla continua
+
+Creiamo anche la variabile che assegni una categoria (low, medium, high), sulla base del valore continuo
+
+```{r}
+map_europe_comp$category_income[map_europe_comp$income_2019<34000]<- '1_Low'
+map_europe_comp$category_income[map_europe_comp$income_2019>34000 &
+                               map_europe_comp$income_2019<51000]<- '2_Medium'
+map_europe_comp$category_income[map_europe_comp$income_2019>51000]<- '3_High'
+
+head(map_europe_comp)
+```
+
+# Preparazione etichette alle nazioni
+
+Il dataset eurasiafrica_points contiene informazioni su dove mettere le etichette relative al nome della nazione (iso_a2).
+
+Alcune nazioni hanno l'etichetta con il codice non perfettamente centrato di default, quindi per alcune togliamo l'informazione dal dataset (usato solo a questo scopo, HDI_nations) e le metteremo poi manualmente.
+
+```{r}
+HDI_nations<- subset(eurasiafrica, 
+                     (!is.na(map_europe_comp$income_2019) & eurasiafrica$sov_a3!= 'NOR'
+                      & eurasiafrica$iso_a2!= 'GB'
+                      & eurasiafrica$iso_a2!= 'DK'
+                      & eurasiafrica$iso_a2!= 'GR'
+                      & eurasiafrica$iso_a2!= 'FR'
+                      & eurasiafrica$iso_a2!= 'RU'
+                      & eurasiafrica$iso_a2!= 'IL'))
+
+eurasiafrica_points<- st_centroid(HDI_nations)
+eurasiafrica_points<- cbind(HDI_nations, st_coordinates(st_centroid(HDI_nations$geometry)))
+```
+
+Attenzione: è capitato che che il comando st_centroid smettesse di funzionare dopo un aggiornamento del pacchetto. Il problema era il cambiamento delle informazioni di un paese (Russia). La soluzione è stata togliere anche questo paese da HDI_nations e metterlo poi manualmente
+
+# Creazione mappa
+
+### Mappa con scala continua
+
+Inseriamo la directory dove sarà salvata la mappa, e il nome del file che conterrà la mappa con le dimensioni in pixel
+
+```{r}
+setwd('C:\\files\\HDI maps\\maps_income_GNI')
+tiff(filename='map_cont_2023.jpg', width = 1500, height=1620)
+```
+
+E poi creiamo la mappa
+
+```{r}
+ggplot(data= eurasiafrica) +
+  geom_sf(color= 'black', aes(fill=map_europe_comp$income_2019)) +
+  theme(legend.key.size = unit(3.5, 'lines'),
+        legend.text = element_text(size= 20),
+        legend.title = element_text(size= 20),
+        plot.title = element_text(size=30))+
+  labs(fill='Income')+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',direction=1,begin=0.3, limits= c(10000,71000))+
+  coord_sf(xlim= c(-25, 60), ylim= c(25, 70), expand= FALSE, label_axes = 'SW')+
+  xlab('') + ylab('')+
+  ggtitle('Income, continuous scale')+
+  geom_text(data= eurasiafrica_points, aes(x=X, y=Y,label= iso_a2),size=5, color= 'black', fontface= 'bold')+
+  annotate(geom= 'text',x=40, y=55, label= 'RU', color= 'black', size=5, fontface= 'bold')+
+  annotate(geom='text', x=-1, y=52.5, label= 'GB', color= 'black', size=5,fontface= 'bold')+
+  annotate(geom= 'text', x= 9, y= 56, label= 'DK', color= 'black', size= 5, fontface= 'bold')+
+  annotate(geom= 'text',x= 21.5, y= 39.5, label= 'GR', color= 'black', size= 5, fontface= 'bold')+
+  annotate(geom= 'text',x= 3.5, y= 47, label= 'FR', color= 'black', size= 5, fontface= 'bold')+
+  annotate(geom= 'text',x= 35, y= 31, label= 'IL', color= 'black', size= 5, fontface= 'bold')
+
+dev.off()
+```
+
+Nel file word le dimensioni sono completamente scorrette, ma andando a vedere il file jpg creato con tiff vediamo che la qualità dell'immagine è elevata e le dimensioni sono coerenti. Questo è dovuto a differenze nella decodifica dei valori di size quando si usa il comando tiff e quando R costruisce il grafico per conto proprio.
+
+- data: dataset eurasiafrica,  quello contenente le informazioni sui contorni dei paesi
+- geom_sf(aes(fill= ): nome del dataset e della variabile di interesse
+- theme: informazioni sulle dimensioni della legenda e del titolo
+- labs: Boh?
+- scale_fill_viridis è il nome della palette, con dentro informazioni sulla direzione della palette, inizio della palette (begin), e limiti dei valori delle realizzazioni della variabile
+- coord_sf dice quali coordinate della mappa mostrare. Le coordinate così impostate mostrano europpa, parte della russia, israele. Cambiando si può stringere sull'europa o altre parti, a seconda di cosa ci interessa
+- xlab, ylab sono i labels degli assi
+- ggtitle è il titolo della mappa, riportato in alto a sx
+- geom_text viene usato per prendere le informazioni sulle etichette dei nomi delle nazioni e metterle nella mappa
+- annotate riporta i nomi delle nazioni che abbiamo tolto dal dataset hdi_nations e che mettiamo qui manualmente
+
+### mappa con variabili categoriali
+
+```{r}
+tiff(filename='map_cat2023.jpg', width = 1500, height=1620)
+
+ggplot(data= eurasiafrica) +
+  geom_sf(color= 'black', aes(fill= map_europe_comp$category_income)) +
+  theme(legend.key.size = unit(3.5, 'lines'),
+        legend.text = element_text(size= 20),
+        legend.title = element_text(size= 20),
+        plot.title = element_text(size=30))+
+  labs(fill= 'Income category')+
+  scale_fill_viridis_d(option = 'viridis',begin= 0.3, na.value = 'grey80', direction= 1,
+                       labels= c('Low', 'Medium', 'High', 'NA'), na.translate=F)+
+  coord_sf(xlim= c(-25, 60), ylim= c(25, 70), expand= FALSE,label_axes = 'SW')+
+  xlab('')+ ylab('')+
+  ggtitle('Income categories')+
+  geom_text(data= eurasiafrica_points, aes(x=X, y=Y,label= iso_a2),size=5, color= 'black', fontface= 'bold')+
+  annotate(geom= 'text',x=40, y=55, label= 'RU', color= 'black', size=5, fontface= 'bold')+
+  annotate(geom='text', x=-1, y=52.5, label= 'GB', color= 'black', size=5,fontface= 'bold')+
+  annotate(geom= 'text', x= 9, y= 56, label= 'DK', color= 'black', size= 5, fontface= 'bold')+
+  annotate(geom= 'text',x= 21.5, y= 39.5, label= 'GR', color= 'black', size=5, fontface= 'bold')+
+  annotate(geom= 'text',x= 3.5, y= 47, label= 'FR', color= 'black', size= 5, fontface= 'bold')+
+  annotate(geom= 'text',x= 35, y= 31, label= 'IL', color= 'black', size= 5, fontface= 'bold')
+
+dev.off()
+
+```
+
+Il codice è molto simile a quello utilizzato per la mappa in scala continua.
+Si nota però che la palette è diversa, e per scale_fill_viridis_d abbiamo:
+
+- labels, che è il nome che deve essere dato alle variabili nella legenda
+- na.translate= FALSE fa sì che NA non venga inserito in legenda
