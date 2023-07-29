@@ -1,2 +1,2 @@
 # EUmaps
-Europe heatmaps in R, for both categorical and numerical variables
+Europe and US heatmaps in R and SAS, for both categorical and numerical variables
