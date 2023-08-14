@@ -1,0 +1,294 @@
+---
+title: "Italy regions map"
+author: "Luigi"
+date: "2023-08-08"
+output: pdf_document
+---
+
+# Italian regions map with ggplot2
+
+Necessary packages
+
+```{r, warning=FALSE, message=FALSE}
+require(ggplot2)
+require(rnaturalearth)
+require(rnaturalearthdata)
+require(dplyr)
+require(readxl)
+
+setwd("C:/Users/luigi/Desktop/ISTAT_Poster/Farmaci_titolo_studio")
+```
+
+# Regions shape
+
+We prepare information for the shape of each italian region
+
+```{r}
+italy <- ne_states(country = "italy", returnclass = "sf")
+
+# Keep only information regarding regions (no province level)
+it_regions<- italy %>%
+             group_by(region) %>%
+             summarise()
+
+ggplot(data = it_regions)+
+  geom_sf()+
+  theme(panel.grid.major = element_blank(),  # remove grid
+        panel.grid.minor = element_blank())+ # remove grid
+  coord_sf(label_axes = "SW")                # remove coordinates  
+```
+
+
+# BMI
+
+```{r}
+df<- as.data.frame(read_excel("BmiMap.xlsx",
+                   col_names= T, range = 'A1:E21'))
+
+
+df$regione <- ifelse(df$Territorio == "Puglia", "Apulia",
+              ifelse(df$Territorio == "Sicilia", "Sicily",
+              ifelse(df$Territorio == "Trentino Alto Adige", "Trentino-Alto Adige",
+                                       df$Territorio)))
+
+
+df <- arrange(df, regione)
+
+# Checking that all regions have the same name and are in the same order
+table(df$regione==it_regions$region)
+
+```
+
+Suppose we want to evaluate the number of overweight and obese in each region; we need to sum together the corresponding columns
+
+```{r}
+df$OwAndOb<- df$sovrappeso + df$obesi
+
+df_finale <- cbind(it_regions, df)
+```
+
+
+Sovrappeso e obesi insieme
+
+```{r}
+#tiff(filename = "Overw_obese2022_map", width = 2000, height = 2000)
+
+ggplot(data = df_finale)+
+  geom_sf(color = "black", aes(fill = OwAndOb))+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',
+                       direction= -1,
+                       begin=0, limits= c(40,55))+
+  ggtitle("Sovrappeso e obesi")+
+  labs(fill = "N per 100 persone")+
+  theme(panel.grid.major = element_blank(),  # remove grid
+        panel.grid.minor = element_blank())+ # remove grid
+  coord_sf(label_axes = "SW")                # remove coordinates  
+
+#dev.off()
+```
+
+Solo obesi
+
+```{r}
+#tiff(filename = "obese2022_map", width = 2000, height = 2000)
+
+ggplot(data = df_finale)+
+  geom_sf(color = "black", aes(fill = obesi))+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',
+                       direction= -1,
+                       begin=0, limits= c(9,15))+
+  ggtitle("Obesi")+
+  labs(fill = "N per 100 persone")+
+  theme(panel.grid.major = element_blank(),  # remove grid
+        panel.grid.minor = element_blank())+ # remove grid
+  coord_sf(label_axes = "SW")                # remove coordinates  
+
+#dev.off()
+```
+
+# Alcol fuori pasto
+
+```{r}
+df<- as.data.frame(read_excel("AlcolFuoriPastoMap.xlsx",
+                   col_names= T, range = 'A1:C21'))
+
+dimnames(df)[[2]][c(2,3)]<- c("AlcolFP", "NoAlcolFP")
+
+
+df$regione <- ifelse(df$Territorio == "Puglia", "Apulia",
+              ifelse(df$Territorio == "Sicilia", "Sicily",
+              ifelse(df$Territorio == "Trentino Alto Adige", "Trentino-Alto Adige",
+                                       df$Territorio)))
+
+
+df <- arrange(df, regione)
+
+# Checking that all regions have the same name and are in the same order
+table(df$regione==it_regions$region)
+
+df_finale <- cbind(it_regions, df)
+```
+
+```{r}
+#tiff(filename = "NoAlcolFP2022_map", width = 2000, height = 2000)
+
+ggplot(data = df_finale)+
+  geom_sf(color = "black", aes(fill = NoAlcolFP))+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',direction=1,begin=0.3,
+                       limits= c(floor(min(df$NoAlcolFP)),ceiling(max(df$NoAlcolFP))))+
+  ggtitle("Persone >11 anni che NON consumano alcol fuori pasto")+
+  labs(fill = "N per 100 persone")+
+  theme(panel.grid.major = element_blank(),  # remove grid
+        panel.grid.minor = element_blank())+ # remove grid
+  coord_sf(label_axes = "SW")                # remove coordinates  
+
+#dev.off()
+```
+
+
+
+```{r}
+#tiff(filename = "SiAlcolFP2022_map", width = 2000, height = 2000)
+
+ggplot(data = df_finale)+
+  geom_sf(color = "black", aes(fill = AlcolFP))+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',
+                       direction= -1,begin=0.3,
+                       limits= c(20,50))+
+  ggtitle("Persone >11 anni che consumano alcol fuori pasto")+
+  labs(fill = "N per 100 persone")+
+  theme(panel.grid.major = element_blank(),  # remove grid
+        panel.grid.minor = element_blank())+ # remove grid
+  coord_sf(label_axes = "SW")                # remove coordinates  
+
+#dev.off()
+```
+
+# Verdura, ortaggi e frutta
+
+```{r}
+df<- as.data.frame(read_excel("VerduraMap.xlsx",
+                   col_names= T, range = 'A1:H21'))
+
+dimnames(df)[[2]][2:8]<- c("Verd>1", "Ort>1", "Frut>1", "General>1",
+                           "OnlyOne", "TwoFour", "MoreThanFive")
+
+
+df$regione <- ifelse(df$Territorio == "Puglia", "Apulia",
+              ifelse(df$Territorio == "Sicilia", "Sicily",
+              ifelse(df$Territorio == "Trentino Alto Adige", "Trentino-Alto Adige",
+                                       df$Territorio)))
+
+
+df <- arrange(df, regione)
+
+# Checking that all regions have the same name and are in the same order
+table(df$regione==it_regions$region)
+
+df_finale <- cbind(it_regions, df)
+```
+
+```{r}
+#tiff(filename = "Verd2022_map", width = 2000, height = 2000)
+
+ggplot(data = df_finale)+
+  geom_sf(color = "black", aes(fill =  df$`Verd>1`))+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',
+                       direction= 1,
+                       begin=0,
+                       limits= c(35, 60))+
+  ggtitle("Persone che consumano almeno una verdura al giorno")+
+  labs(fill = "N per 100 persone")+
+  theme(panel.grid.major = element_blank(),  # remove grid
+        panel.grid.minor = element_blank())+ # remove grid
+  coord_sf(label_axes = "SW")                # remove coordinates  
+
+#dev.off()
+```
+
+```{r}
+#tiff(filename = "Frut2022_map", width = 2000, height = 2000)
+
+ggplot(data = df_finale)+
+  geom_sf(color = "black", aes(fill =  df$`Frut>1`))+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',
+                       direction= 1,
+                       begin=0,
+                       limits= c(65, 80))+
+  ggtitle("Persone che consumano almeno una frutta al giorno")+
+  labs(fill = "N per 100 persone")+
+  theme(panel.grid.major = element_blank(),  # remove grid
+        panel.grid.minor = element_blank())+ # remove grid
+  coord_sf(label_axes = "SW")                # remove coordinates  
+
+#dev.off()
+```
+
+```{r}
+#tiff(filename = "Genmorethan5_2022_map.jpeg", width = 2000, height = 2000)
+
+ggplot(data = df_finale)+
+  geom_sf(color = "black", aes(fill =  df$MoreThanFive))+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',
+                       direction= 1,
+                       begin=0,
+                       limits= c(2,8))+
+  ggtitle("Persone che consumano 5 o piu tra frutta, verdura e ortaggi al giorno")+
+  labs(fill = "N per 100 persone")+
+  theme(panel.grid.major = element_blank(),     # remove grid
+        panel.grid.minor = element_blank()#,     # remove grid
+        #legend.key.size = unit(3.5, 'lines'),   # Dimensions parameters
+        #legend.text = element_text(size= 20),
+        #legend.title = element_text(size= 30),
+        #plot.title = element_text(size=50)
+        )+ 
+  coord_sf(label_axes = "SW")                # remove coordinates  
+
+#dev.off()
+```
+
+La mappa seguente mostra la variazione del numero di individui che consumano almeno uno tra verdura, ortaggi o frutta al giorno, ogni 100 abitanti, per ciascuna regione
+
+```{r}
+df2011<- as.data.frame(read_excel("VerduraMap.xlsx",
+                   col_names= T, range = 'J1:Q21'))
+
+dimnames(df2011)[[2]][2:8]<- c("Verd>1", "Ort>1", "Frut>1", "General>1",
+                           "OnlyOne", "TwoFour", "MoreThanFive")
+
+
+df2011$regione <- ifelse(df2011$Territorio == "Puglia", "Apulia",
+              ifelse(df2011$Territorio == "Sicilia", "Sicily",
+              ifelse(df2011$Territorio == "Trentino Alto Adige", "Trentino-Alto Adige",
+                                       df2011$Territorio)))
+
+
+df2011 <- arrange(df2011, regione)
+
+# Checking that all regions have the same name and are in the same order
+table(df2011$regione==it_regions$region)
+
+tot_change <- df$`General>1` - df2011$`General>1`
+
+df_finale <- cbind(it_regions, tot_change)
+```
+
+
+```{r}
+#tiff(filename = "Frut2022_map", width = 2000, height = 2000)
+
+ggplot(data = df_finale)+
+  geom_sf(color = "black", aes(fill = tot_change))+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',
+                       direction= 1,
+                       begin=0,
+                       limits= c(-10, 0))+
+  ggtitle("Almeno 1 elemento al gg dal 2011 al 2022, per 100 abitanti")+
+  labs(fill = "Variazione per 100 persone")+
+  theme(panel.grid.major = element_blank(),  # remove grid
+        panel.grid.minor = element_blank())+ # remove grid
+  coord_sf(label_axes = "SW")                # remove coordinates  
+
+#dev.off()
+```
+
