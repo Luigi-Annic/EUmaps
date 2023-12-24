@@ -1,0 +1,283 @@
+---
+title: "World Maps"
+author: "Luigi Annicchiarico"
+date: "2023-12-06"
+output: pdf_document
+geometry: "left=1cm,right=1cm,top=2.5cm,bottom=2.5cm"
+---
+
+# 0: Packages
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+require(dplyr)
+
+require(countrycode) # automatically create isoa2 from long name
+```
+
+Versions:
+
+- ggplot2  v. 3.4.4
+- rnaturalearth  v. 0.3.4
+- rnaturalearthdata  v. 0.1.0
+- sf   v. 1.0-14
+- dplyr v. 1.1.4
+
+# 1: Prepare geometries
+
+```{r}
+world <- ne_countries(scale = "medium", continent = NULL, returnclass = "sf")
+```
+
+Here we have information about geometry of all the countries
+
+\newpage
+
+# 2: data simulation
+
+For this demonstration, we will simulate some data. 
+
+To simulate the data, we keep the column about iso a3 and for each row (aka for each country) we simulate a value
+
+To make it more similar to a real scenario, we will simulate, for each row:
+
+- a value0 $\in (0,100)$
+- a binary variable narandom $\rightarrow$ 10% of the rows will have NA
+- value, which will be NA if narandom is 1, and the value extracted as value0 otherwise
+- another dummy variable called dummykeep, which determines whether the row will be kept in the final data set at all
+
+This way, the final data set will not have information about all the countries in the world, it will have a random value between 0 and 100 for most of the countries included in the data set, and it will also have some rows with missing information regarding the "value".
+
+This makes the simulated similar to a real one, as we will never have information regarding all the countries in the world, and we might have some rows with missing information.
+
+**It is instrumental that the input data set has the iso_a2 code**, because using the long names might cause conflicts and errors (e.g. different languages, "republic of", abbreviations...). It is also useful to have no missing information in the iso_a2 code column, for obvious reasons. 
+
+Keeping other columns should not result in issues of any sort. For example, here we keep in the final data set also the country name column, even if we will not use it.
+
+
+```{r}
+set.seed(2789342) # let it be reproducible
+
+simdata <- as.data.frame(world) %>% # to delete the class "sf" from the simulated data set
+  select(name, iso_a2) %>%
+  mutate(dummykeep = rbinom(nrow(world),1,0.4),
+         narandom = rbinom(nrow(world),1, 0.1), 
+         value0 = round(runif(nrow(world), min = 0, max = 100),2),
+         value = ifelse(narandom == 1, NA, value0)
+         ) %>%
+  filter(dummykeep == 1) %>%              
+  filter(!is.na(iso_a2)) %>%    # delete territories without iso code (no drawbacks, just for code clarity) 
+  select(!c(dummykeep, narandom, value0)) # deleting unuseful variables
+
+head(simdata)
+tail(simdata)
+```
+
+
+\newpage
+
+# 3: Merging
+
+Now we just merge the information that we need from the world database with the information in the simdata
+
+```{r}
+map_df0<- world %>%
+  select(name, iso_a2, iso_a3, geometry)
+
+map_df <- left_join(map_df0, simdata, by = "iso_a2")
+
+class(map_df)
+head(map_df)
+```
+
+We see that the data set "map_df" has both classes `data.frame` and `sf` (stands for surface, probably)
+
+### Creazione variabile categorica dalla continua
+
+From the continuous values, we create a categorical variable based on quantiles.\
+We will use this variable for the second map.
+
+```{r}
+qt1 <- quantile(map_df$value, c(0.33, 0.66), na.rm = T)[[1]]
+qt2 <- quantile(map_df$value, c(0.33, 0.66), na.rm = T)[[2]]
+map_df <- map_df %>%
+  mutate(ValCat = case_when(value <= qt1 ~ "1_Low",
+                            value > qt1 & value <= qt2 ~ "2_Medium",
+                            value > qt2 ~ "3_High"))
+```
+\newpage
+
+# Preparazione etichette alle nazioni
+
+the dataset "world_points" willc ontain information regarding where to put country labels in the map (iso_a2). The position is based on centroids of each country's geometry.
+
+
+```{r}
+point_nations<- map_df %>%
+  filter(!(is.na(iso_a2) | iso_a2 %in% c('RU', 'AQ', 'FJ', 
+                                         'IN', 'SD','SS', 'SN')))
+
+world_points0<- st_centroid(point_nations)
+world_points0<- cbind(point_nations, st_coordinates(st_centroid(point_nations$geometry)))
+
+leftout <- map_df %>%
+  filter(iso_a2 %in% c('RU', 'AQ', 'FJ', 'IN', 'SD','SS', 'SN')) %>%
+  mutate( X = c(0,   178, 79, 40, 30, 31, -14),
+          Y = c(-80, -17, 21, 55, 12, 7,  14)) %>%
+  relocate(geometry, .after = Y)
+
+
+world_points <- rbind(world_points0, leftout)
+
+world_points <- world_points %>%
+  filter(!(is.na(value)))
+
+```
+
+Warning: some of the country polygons in the data are not optimally defined, and including these countries results in a strange error about eges crossing each other. 
+
+Some countries with this issue are
+
+- Russia Antarctica, Fiji, India, Sudan, Sud Sudan, Senegal
+
+but others might appear later. I solve this issue by excluding them from the world_points0 database, and entering by hand the coordinates where I want those labels to be printed. Then, with the last command I keep only nations with known value of the variable of interest in the database.
+
+
+\newpage
+
+# Controlling images' weight 
+
+```{r}
+div <- 1
+```
+
+`div` è la quantità per cui dividere le dimensioni di default (per avere immagine più leggera).
+per div=1 l'immagine pesa 7120 kb.
+All'aumentare di div l'immagine si fa più leggera ma perde qualità (si nota specialmente per le etichette dei paesi). Se il peso non è un problema e vuoi un'immagine di maggiore qualità puoi assegnare a div valori inferiori a 1.
+
+
+# Mappa con scala continua
+
+Inseriamo la directory dove sarà salvata la mappa, e il nome del file che conterrà la mappa con le dimensioni in pixel
+
+E poi creiamo la mappa
+
+Note that with `eval = FALSE` at the beginning of the chunk, the code does not run. I do this to ensure that the Rmd runs smoothly even on different computers, where the selected working directory would not exist, resulting in an error. \\
+If you want to save the jpg file, delete the `eval = FALSE` option :)
+
+```{r, eval=FALSE}
+setwd('C:\\files\\HDI maps\\maps_income_GNI')
+tiff(filename='world_cont_2023c.jpg', width = 1500/div, height=1620/div)
+
+ggplot(data= map_df) +
+  geom_sf(color= 'black', aes(fill= value)) +
+  theme(legend.key.size = unit(3.5/div, 'lines'),
+        legend.text = element_text(size= 20/div),
+        legend.title = element_text(size= 20/div),
+        plot.title = element_text(size=20/div),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'grey95'))+
+  labs(fill='legend text')+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',direction=1,begin=0.3, limits= c(0, 100))+
+# coord_sf(xlim= c(-25, 60), ylim= c(25, 70), expand= FALSE, label_axes = 'SW')+ 
+  xlab('') + ylab('')+
+  ggtitle('World Map title, continuous scale') +
+  geom_text(data= world_points, aes(x=X, y=Y,label= iso_a2),size=5/div, color= 'black', fontface= 'bold')
+  
+
+dev.off()
+```
+
+If you comment the tiff and dev.off lines and knit, you will see that, in the knitted file, the dimensions of texts and objects are uncorrect. However, these values make sense if you look at the jpg file generated by the tiff (and dev.off) function, where the image quality is high and the dimensions are coherent. Questo è dovuto a differenze nella decodifica dei valori di size quando si usa il comando tiff e quando R costruisce il grafico per conto proprio.
+
+- `data`: map_df (it contains info about geometries and the filling column)
+- `geom_sf(aes(fill= )`: enter the variable of interest 
+- `theme`: legend, titles, and background specifications.
+- `labs`: legend title label
+- `scale_fill_viridis` è il nome della palette, con dentro informazioni sulla direzione della palette, inizio della palette (begin), e limiti dei valori delle realizzazioni della variabile
+- `coord_sf` dice quali coordinate della mappa mostrare. As that command is skipped in this demonstration, the whole world is displayed. You can change this and uncomment this row if you are interested, for example, in displaying only Europe.
+- `xlab`, `ylab`: axis labels
+- `ggtitle`: map title
+- `geom_text`: for including country labels. The data contains the coordinates about each country's centroid, where the label will lay. By default, the code will enter only labels of countries in the input data set (in this vignette, simdata), that do not have issues with the centroids (i.e. Russia, Antarctica, maybe others to be discovered). In case you want to include the label about other nations, you can add a row with the label and coordinates in the world_points data set, or include them using the `annotate` command 
+- `annotate` riporta i nomi delle nazioni che abbiamo tolto dal dataset hdi_nations e che mettiamo qui manualmente
+
+here below I also add a map with identical aes values as before, but without tiff and dev.off, and without country labels. It might make sense to exclude country labels in case you want to display the whole world and information about a lot of countries, as in this case country labels may become a nuisance.\
+Also note that, for this map, the size values for all the features are slightly different in order to fit the pdf. Nevertheless, these sizes can be modified.
+
+*Note that knitted images in the pdf file have lower quality compared to those saved as jpg*
+
+```{r, fig.dim=c(20,20)}
+ggplot(data= map_df) +
+  geom_sf(color= 'black', aes(fill= value)) +
+  theme(legend.key.size = unit(2, 'lines'),
+        legend.text = element_text(size= 15),
+        legend.title = element_text(size= 15),
+        plot.title = element_text(size=15),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'grey95'))+
+  labs(fill='legend text')+
+  scale_fill_viridis_c(option='viridis', na.value = 'grey80',direction=1,begin=0.3, limits= c(0, 100))+
+# coord_sf(xlim= c(-25, 60), ylim= c(25, 70), expand= FALSE, label_axes = 'SW')+ 
+  xlab('') + ylab('')+
+  ggtitle('World Map on simulated continuous data') 
+
+  
+```
+
+\newpage
+
+# mappa con variabili categoriali
+
+Same as above regarding `eval = FALSE`.
+
+```{r, eval=FALSE}
+tiff(filename='map_cat2023.jpg', width = 1500, height=1620)
+
+ggplot(data= map_df) +
+  geom_sf(color= 'black', aes(fill= ValCat)) +
+  theme(legend.key.size = unit(3.5/div, 'lines'),
+        legend.text = element_text(size= 20/div),
+        legend.title = element_text(size= 20/div),
+        plot.title = element_text(size=20/div),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'grey95'))+
+  labs(fill= ' category')+
+  scale_fill_viridis_d(option = 'viridis',begin= 0.3, na.value = 'grey80', direction= 1,
+                       labels= c('Low', 'Medium', 'High', 'NA'), na.translate=T)+
+ # coord_sf(xlim= c(-25, 60), ylim= c(25, 70), expand= FALSE,label_axes = 'SW')+
+  xlab('')+ ylab('')+
+  ggtitle('World map on categorical data')+
+  geom_text(data= world_points, aes(x=X, y=Y,label= iso_a2),size=5/div, color= 'black', fontface= 'bold')
+
+
+dev.off()
+
+```
+
+Il codice è molto simile a quello utilizzato per la mappa in scala continua.
+Si nota però che la palette è diversa, e per scale_fill_viridis_d abbiamo:
+
+- labels, che è il nome che deve essere dato alle variabili nella legenda
+
+
+```{r, fig.dim=c(20,20)}
+ggplot(data= map_df) +
+  geom_sf(color= 'black', aes(fill= ValCat)) +
+  theme(legend.key.size = unit(2, 'lines'),
+        legend.text = element_text(size= 15),
+        legend.title = element_text(size= 15),
+        plot.title = element_text(size= 15),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'grey95'))+
+  labs(fill= ' category')+
+  scale_fill_viridis_d(option = 'viridis',begin= 0.3, na.value = 'grey80', direction= 1,
+                       labels= c('Low', 'Medium', 'High', 'NA'), na.translate=T)+
+ # coord_sf(xlim= c(-25, 60), ylim= c(25, 70), expand= FALSE,label_axes = 'SW')+
+  xlab('')+ ylab('')+
+  ggtitle('World map on categorical data')+
+  geom_text(data= world_points, aes(x=X, y=Y,label= iso_a2),size= 4, color= 'black', fontface= 'bold')
+```
+
